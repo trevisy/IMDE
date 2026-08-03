@@ -273,7 +273,7 @@
     "@vscode/vsce": "^2.22.0",
     "@vue/compiler-sfc": "^3.3.4",
     "css-loader": "^6.8.1",
-    "sass": "^1.64.1",
+    "sass": "^1.102.0",
     "sass-loader": "^13.3.2",
     "ts-loader": "^9.3.1",
     "ts-node": "^10.9.2",
