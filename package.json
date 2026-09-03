@@ -273,7 +273,7 @@
     "publish": "vsce publish"
   },
   "devDependencies": {
-    "@types/node": "^18.19.0",
+    "@types/node": "^26.1.2",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^2.22.0",
     "@vue/compiler-sfc": "^3.3.4",
