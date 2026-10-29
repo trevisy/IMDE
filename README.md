@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="media/ingenic_logo.svg" width="96" alt="Ingenic logo">
+  <img src="media/ingenic_logo.png" width="96" alt="Ingenic logo">
 
   <h1>IMDE</h1>
 
