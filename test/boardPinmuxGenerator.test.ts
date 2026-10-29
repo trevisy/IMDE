@@ -16,7 +16,7 @@ function check(condition: boolean, message: string): void {
 const definition: PinmuxDefinition = {
   format: "impx",
   version: 1,
-  device: { id: "test", name: "Test" },
+  chip: { id: "test", name: "Test" },
   package: { id: "qfn", name: "QFN", pinCount: 2 },
   source: { file: "test.xlsx", revision: "1", date: "2026-01-01", sheets: [] },
   signals: {
@@ -28,14 +28,14 @@ const definition: PinmuxDefinition = {
       id: "PC04",
       powerDomain: "VDD",
       pad: "CAN0_TX_PC04",
-      default: { mode: "input", pull: "none", driveMa: 10 },
+      default: { mode: "input", pull: "none", driveStrength_mA: 10 },
       functions: [{ mux: 3, signal: "CAN0_TX" }],
     },
     {
       id: "PA01",
       powerDomain: "VDD",
       pad: "CAN0_TX_PA01",
-      default: { mode: "input", pull: "none", driveMa: 10 },
+      default: { mode: "input", pull: "none", driveStrength_mA: 10 },
       functions: [{ mux: 1, signal: "CAN0_TX" }],
     },
   ],
@@ -49,7 +49,7 @@ const source = generateBoardPinmuxSource(definition, "test", "board", [{
   mux: 3,
   pull: "up",
   speed: "high",
-  driveMa: 20,
+  driveStrength_mA: 20,
   schmitt: true,
 }]);
 
@@ -60,6 +60,17 @@ check(source.includes("static const im_gpio_pinmux_config_t s_board_pinmux[]") &
 check(source.includes("return im_gpio_apply_pinmux(s_board_pinmux,\n                                IM_ARRAY_SIZE(s_board_pinmux));"), "generated pinmux call arguments are aligned");
 check(source.includes("IM_GPIO_FUNCTION_3"), "FUNC value is generated");
 check(source.includes("IM_GPIO_PULL_UP") && source.includes("IM_GPIO_SLEW_HIGH") && source.includes("IM_GPIO_DRIVE_STRENGTH_20MA"), "electrical settings are generated");
+const suffixedDriveSource = generateBoardPinmuxSource(definition, "test", "board", [{
+  owner: "CAN0_TX",
+  pinId: "PC04",
+  kind: "function",
+  mux: 3,
+  pull: "up",
+  speed: "high",
+  driveStrength_mA: "20mA",
+  schmitt: true,
+}]);
+check(suffixedDriveSource.includes("IM_GPIO_DRIVE_STRENGTH_20MA"), "drive strength with mA unit suffix is generated");
 check(source.includes("This is a preview"), "preview marker is generated");
 const persistedSource = generateBoardPinmuxSource(definition, "test", "board", [{
   owner: "CAN0_TX",
@@ -68,7 +79,7 @@ const persistedSource = generateBoardPinmuxSource(definition, "test", "board", [
   mux: 3,
   pull: "up",
   speed: "high",
-  driveMa: 20,
+  driveStrength_mA: 20,
   schmitt: true,
 }], { mode: "persisted" });
 check(persistedSource.includes("Manual edits may be overwritten") && !persistedSource.includes("This is a preview"), "persisted source has the generated-file marker");
@@ -81,7 +92,7 @@ const aliasedOwnerSource = generateBoardPinmuxSource(definition, "test", "board"
   mux: 3,
   pull: "none",
   speed: "high",
-  driveMa: 10,
+  driveStrength_mA: 10,
   schmitt: false,
 }]);
 check(aliasedOwnerSource.includes("IM_GPIO_PINMUX_CONFIG(\"BOARD_CAN_TX\""), "board-level function owner aliases are preserved");
@@ -94,7 +105,7 @@ try {
     mux: 3,
     pull: "none",
     speed: "high",
-    driveMa: 10,
+    driveStrength_mA: 10,
     schmitt: false,
   }]);
 } catch {
@@ -126,7 +137,7 @@ try {
     gpioMode: "output-high",
     pull: "none",
     speed: "low",
-    driveMa: 10,
+    driveStrength_mA: 10,
     schmitt: false,
   }]);
 } catch {
@@ -141,7 +152,7 @@ const boardPins = generateBoardPinsHeader("test", "board", [{
   activeLevel: "low",
   pull: "none",
   speed: "low",
-  driveMa: 10,
+  driveStrength_mA: 10,
   schmitt: false,
 }, {
   owner: "CAN0_TX",
@@ -150,7 +161,7 @@ const boardPins = generateBoardPinsHeader("test", "board", [{
   mux: 3,
   pull: "none",
   speed: "high",
-  driveMa: 10,
+  driveStrength_mA: 10,
   schmitt: false,
 }]);
 check(boardPins.includes("BOARD_TP_RST") && boardPins.includes("IM_GPIO_SIGNAL(IM_GPIO_PORT_A, 1U, false)"), "selected GPIO signal is generated with its active level");
@@ -164,7 +175,7 @@ const gpioRoundtripSource = generateBoardPinmuxSource(definition, "test", "board
   activeLevel: "low",
   pull: "down",
   speed: "high",
-  driveMa: 20,
+  driveStrength_mA: 20,
   schmitt: true,
 }]);
 const gpioRoundtrip = parseBoardPinmux(gpioRoundtripSource, "preview.c", definition, boardPins);
@@ -179,7 +190,7 @@ try {
       mux: 3,
       pull: "none",
       speed: "low",
-      driveMa: 10,
+      driveStrength_mA: 10,
       schmitt: false,
     },
     {
@@ -188,7 +199,7 @@ try {
       mux: 1,
       pull: "none",
       speed: "low",
-      driveMa: 10,
+      driveStrength_mA: 10,
       schmitt: false,
     },
   ]);
@@ -206,7 +217,7 @@ try {
       gpioMode: "output-low",
       pull: "none",
       speed: "low",
-      driveMa: 10,
+      driveStrength_mA: 10,
       schmitt: false,
     },
     {
@@ -216,7 +227,7 @@ try {
       gpioMode: "output-high",
       pull: "none",
       speed: "low",
-      driveMa: 10,
+      driveStrength_mA: 10,
       schmitt: false,
     },
   ]);

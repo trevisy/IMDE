@@ -28,10 +28,11 @@ function extensionKconfig(projectDir: string): string | undefined {
     }
     if (kconfigs.length === 0) return undefined;
     const generated = path.join(projectDir, ".imde", "kconfig", "extensions.Kconfig");
+    const kconfigPath = (value: string): string => value.replace(/\\/g, "/");
     const content = [
       'mainmenu "SDK Configuration"',
-      `source "${path.join(projectDir, "Kconfig")}"`,
-      ...kconfigs.map(kconfig => `source "${kconfig}"`),
+      `source "${kconfigPath(path.join(projectDir, "Kconfig"))}"`,
+      ...kconfigs.map(kconfig => `source "${kconfigPath(kconfig)}"`),
       "",
     ].join("\n");
     fs.mkdirSync(path.dirname(generated), { recursive: true });
@@ -389,33 +390,90 @@ export function activate(context: vscode.ExtensionContext) {
           import("./pinmux/boardWorkspace"),
           import("./pinmux/panel"),
         ]);
+        const definitionCache = new Map<string, Awaited<ReturnType<typeof loadPinmuxFile>>>();
+        const loadDefinition = async (filePath: string) => {
+          const cached = definitionCache.get(filePath);
+          if (cached) return cached;
+          const loaded = await loadPinmuxFile(filePath);
+          definitionCache.set(filePath, loaded);
+          return loaded;
+        };
         const chips = await discoverPinmuxTargets(projectDir);
         if (chips.length === 0) {
           vscode.window.showWarningMessage("IMDE: no BSP chips with board_pinmux.c were found.");
           return;
         }
+        const chipItems = await Promise.all(chips.map(async chip => {
+          const packages = await Promise.all(chip.pinlistFiles.map(async file => {
+            try {
+              const { definition } = await loadDefinition(file);
+              return `${definition.chip.name} · ${definition.package.name}`;
+            } catch {
+              return path.basename(file, ".impx");
+            }
+          }));
+          return {
+            label: chip.id,
+            description: packages.length ? packages.join("  |  ") : `${chip.boards.length} board${chip.boards.length === 1 ? "" : "s"}`,
+            detail: `${chip.pinlistFiles.length} chip/package definition${chip.pinlistFiles.length === 1 ? "" : "s"}`,
+            chip,
+          };
+        }));
+        while (true) {
         const chipItem = await vscode.window.showQuickPick(
-          chips.map(chip => ({ label: chip.id, description: `${chip.boards.length} board${chip.boards.length === 1 ? "" : "s"}`, chip })),
+          chipItems,
           { placeHolder: "Select a chip" },
         );
         if (!chipItem) return;
+        const sources = (["project", "test"] as const).filter(source =>
+          chipItem.chip.boards.some(board => board.source === source) || chipItem.chip.sourceDirectories[source]);
+        while (true) {
+        const sourceItem = await vscode.window.showQuickPick(
+          [{ label: "← Back", description: "Return to chip selection", alwaysShow: true, isBack: true as const }, ...sources.map(source => ({
+            label: source,
+            description: `${chipItem.chip.boards.filter(board => board.source === source).length} board${chipItem.chip.boards.filter(board => board.source === source).length === 1 ? "" : "s"}`,
+            source,
+          }))],
+          { placeHolder: `Select ${chipItem.chip.id} source` },
+        );
+        if (!sourceItem) return;
+        if ("isBack" in sourceItem) break;
+        const sourceBoards = chipItem.chip.boards.filter(board => board.source === sourceItem.source);
+        const { parseBoardPinmuxIdentity } = await import("./pinmux/boardIdentity");
+        const boardItems = await Promise.all(sourceBoards.map(async board => {
+          let detail: string;
+          try {
+            const identity = parseBoardPinmuxIdentity(await fs.promises.readFile(board.pinmuxFile, "utf8"));
+            detail = identity
+              ? `Chip: ${identity.chipId} · Package: ${identity.packageId}`
+              : "Chip / Package: not specified";
+          } catch (error) {
+            detail = `Chip / Package: ${error instanceof Error ? error.message : String(error)}`;
+          }
+          return {
+            label: board.id,
+            description: path.relative(projectDir, board.pinmuxFile),
+            detail,
+            board,
+            action: "open" as const,
+          };
+        }));
         const boardChoices = [
-          ...chipItem.chip.boards.map(board => ({ label: board.id, description: path.relative(projectDir, board.pinmuxFile), board, action: "open" as const })),
-          { label: "$(add) Create blank BSP...", description: "Start this chip with no selected pins", action: "create" as const },
-          ...(chipItem.chip.boards.length > 0
+          { label: "← Back", description: "Return to source selection", alwaysShow: true, isBack: true as const },
+          ...boardItems,
+          { label: "$(add) Create blank BSP...", description: `Create under ${sourceItem.source}/bsp`, action: "create" as const },
+          ...(sourceBoards.length > 0
             ? [{ label: "$(trash) Delete BSP...", description: "Remove a board and its CMake/Kconfig registration", action: "delete" as const }]
             : []),
         ];
-        const boardItem = await vscode.window.showQuickPick(
-          boardChoices,
-          { placeHolder: `Select a ${chipItem.chip.id} board` },
-        );
+        const boardItem = await vscode.window.showQuickPick(boardChoices, { placeHolder: `Select a ${chipItem.chip.id} board` });
         if (!boardItem) return;
+        if ("isBack" in boardItem) continue;
         if (boardItem.action === "delete") {
           const deleteItem = await vscode.window.showQuickPick(
-            chipItem.chip.boards.map(board => ({
+            sourceBoards.map(board => ({
               label: board.id,
-              description: path.relative(projectDir, board.directory),
+              description: `${board.source} · ${path.relative(projectDir, board.directory)}`,
               board,
             })),
             { placeHolder: `Select a ${chipItem.chip.id} BSP to delete` },
@@ -447,7 +505,7 @@ export function activate(context: vscode.ExtensionContext) {
           const deleted = await deletePinmuxBoard({
             boardId: deleteItem.board.id,
             chipId: chipItem.chip.id,
-            chipDirectory: chipItem.chip.directory,
+            chipDirectory: deleteItem.board.chipDirectory,
           });
           vscode.window.showInformationMessage(`IMDE: deleted ${chipItem.chip.id}/${deleted.boardId} and updated board integration.`);
           refreshProjectState({ map: true });
@@ -457,15 +515,32 @@ export function activate(context: vscode.ExtensionContext) {
           throw new Error(`No .impx pinlist found for ${chipItem.chip.id}.`);
         }
         let pinlistFile = chipItem.chip.pinlistFiles[0];
-        if (chipItem.chip.pinlistFiles.length > 1) {
+        const { resolveBoardPinlist } = await import("./pinmux/boardIdentity");
+        const boardPinlist = boardItem.action === "open"
+          ? await resolveBoardPinlist(boardItem.board.pinmuxFile, chipItem.chip.pinlistFiles)
+          : undefined;
+        if (boardPinlist) pinlistFile = boardPinlist;
+        if (!boardPinlist && chipItem.chip.pinlistFiles.length > 1) {
+          const packageItems = await Promise.all(chipItem.chip.pinlistFiles.map(async filePath => {
+            try {
+              const { definition } = await loadDefinition(filePath);
+              return {
+                label: definition.package.name,
+                description: `${definition.chip.name} · ${definition.package.id} · ${definition.package.pinCount} pins · ${path.relative(projectDir, filePath)}`,
+                filePath,
+              };
+            } catch {
+              return { label: path.basename(filePath), description: path.relative(projectDir, filePath), filePath };
+            }
+          }));
           const pinlistItem = await vscode.window.showQuickPick(
-            chipItem.chip.pinlistFiles.map(filePath => ({ label: path.basename(filePath), description: path.relative(projectDir, filePath), filePath })),
+            packageItems,
             { placeHolder: `Select a ${chipItem.chip.id} package` },
           );
           if (!pinlistItem) return;
           pinlistFile = pinlistItem.filePath;
         }
-        const { definition, filePath } = await loadPinmuxFile(pinlistFile);
+        const { definition, filePath } = await loadDefinition(pinlistFile);
         if (boardItem.action === "create") {
           const boardId = await vscode.window.showInputBox({
             prompt: `Create a blank ${chipItem.chip.id} BSP`,
@@ -491,7 +566,7 @@ export function activate(context: vscode.ExtensionContext) {
           const created = await createPinmuxBoard({
             boardId: normalizedBoardId,
             chipId: chipItem.chip.id,
-            chipDirectory: chipItem.chip.directory,
+            chipDirectory: chipItem.chip.sourceDirectories[sourceItem.source] || chipItem.chip.directory,
             pinmuxSource,
             boardPinsSource,
           });
@@ -501,6 +576,9 @@ export function activate(context: vscode.ExtensionContext) {
         }
         const boardPinmux = await loadBoardPinmuxFile(boardItem.board.pinmuxFile, definition);
         PinmuxPanel.createOrShow(context, definition, filePath, chipItem.chip.id, boardItem.board.id, boardPinmux);
+        return;
+        }
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         vscode.window.showErrorMessage(`IMDE: Pinmux operation failed. ${message}`);

@@ -2,7 +2,7 @@
   "name": "imde",
   "displayName": "IMDE",
   "description": "Ingenic MCU Development Environment for VS Code",
-  "version": "0.3.7",
+  "version": "0.3.8-beta",
   "publisher": "ingenic",
   "license": "ISC",
   "repository": {
@@ -266,7 +266,7 @@
     "test:kconfig": "npx ts-node --project test/tsconfig.json test/kconfig.test.ts",
     "test:diag": "npx ts-node --project test/tsconfig.json test/diagnostics.test.ts",
     "test:intellisense": "npx ts-node --project test/tsconfig.json test/intelliSense.test.ts",
-    "test:pinmux": "npx ts-node --project test/tsconfig.json test/pinmuxDiscovery.test.ts",
+    "test:pinmux": "npx ts-node --project test/tsconfig.json test/pinmuxDiscovery.test.ts && npx ts-node --project test/tsconfig.json test/impxParser.test.ts",
     "test:board-pinmux": "npx ts-node --project test/tsconfig.json test/boardPinmuxParser.test.ts && npx ts-node --project test/tsconfig.json test/boardPinmuxGenerator.test.ts && npx ts-node --project test/tsconfig.json test/pinmuxBoardFiles.test.ts && npx ts-node --project test/tsconfig.json test/pinmuxBoardWorkspace.test.ts",
     "package": "vsce package",
     "package:dry": "vsce ls",

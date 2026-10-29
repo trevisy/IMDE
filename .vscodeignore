@@ -11,6 +11,7 @@ node_modules/**
 *.vsix
 *.tgz
 *.tsbuildinfo
+CHANGELOG.md
 dist/**/*.map
 现状.png
 guiconfig.png

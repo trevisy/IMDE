@@ -190,6 +190,69 @@ config BOARD_FPGA_IMAGE2
   });
 }
 
+async function testConditionalDuplicateSymbolDefinitions() {
+  await withTempKconfig(`
+menu "SoC"
+
+choice
+    prompt "SoC series"
+    default SOC_A
+
+config SOC_A
+    bool "SoC A"
+
+config SOC_B
+    bool "SoC B"
+
+endchoice
+
+if SOC_A
+    source "soc-a/Kconfig"
+endif
+
+if SOC_B
+    source "soc-b/Kconfig"
+endif
+
+config CONSUMER
+    bool "Consumer"
+    depends on BUILD_CORE_V1
+    default y
+
+endmenu
+`, async (dir, main) => {
+    fs.mkdirSync(path.join(dir, "soc-a"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "soc-b"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "soc-a", "Kconfig"), `
+config BUILD_CORE_V1
+    bool "Build V1 firmware"
+    default y
+`, "utf-8");
+    fs.writeFileSync(path.join(dir, "soc-b", "Kconfig"), `
+config BUILD_CORE_V1
+    bool "Build V1 firmware"
+    default y
+`, "utf-8");
+
+    const menus = await parseKconfig(dir, main);
+    const visibility = new VisibilityManager();
+    visibility.initialize(menus);
+
+    const definitions = flattenMenus(menus).filter(menu => menu.name === "BUILD_CORE_V1");
+    const activeDefinition = definitions.find(menu => menu.dependsOn.includes("SOC_A"));
+    const consumer = findMenu(menus, "CONSUMER");
+
+    check(definitions.length === 2, "conditional duplicate symbol definitions remain represented in the menu tree");
+    check(visibility.getContext().BUILD_CORE_V1 === true, "active duplicate definition supplies the shared symbol value");
+    check(consumer.isVisible === true, "consumer remains visible when the active duplicate definition is enabled");
+
+    assert.ok(activeDefinition, "Missing active BUILD_CORE_V1 definition");
+    visibility.updateValue(activeDefinition!.id, false);
+    check(visibility.getContext().BUILD_CORE_V1 === false, "disabling the active duplicate definition updates the shared symbol value");
+    check(consumer.isVisible === false, "consumer hides when the active duplicate definition is disabled");
+  });
+}
+
 async function testLegacySessionCacheIsRejected() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "imde-kconfig-cache-"));
   const main = path.join(dir, "Kconfig");
@@ -339,6 +402,7 @@ function testValueUtilities() {
   await testEscapedQuotePrompt();
   await testOsChoiceDefaultsAndIfSource();
   await testChoiceOptionsFromSources();
+  await testConditionalDuplicateSymbolDefinitions();
   await testLegacySessionCacheIsRejected();
   await testNumericDefaultsAndRanges();
   testWriterNormalization();
