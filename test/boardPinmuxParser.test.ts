@@ -17,7 +17,7 @@ function check(condition: boolean, message: string): void {
 const definition: PinmuxDefinition = {
   format: "impx",
   version: 1,
-  device: { id: "test", name: "Test" },
+  chip: { id: "test", name: "Test" },
   package: { id: "qfn", name: "QFN", pinCount: 2 },
   source: { file: "test.xlsx", revision: "1", date: "2026-01-01", sheets: [] },
   signals: {
@@ -29,14 +29,14 @@ const definition: PinmuxDefinition = {
       id: "PC04",
       powerDomain: "VDD",
       pad: "CAN0_TX_PC04",
-      default: { mode: "input", pull: "none", driveMa: 10 },
+      default: { mode: "input", pull: "none", driveStrength_mA: 10 },
       functions: [{ mux: 2, signal: "OTHER" }, { mux: 3, signal: "CAN0_TX" }],
     },
     {
       id: "PA01",
       powerDomain: "VDD",
       pad: "GPIO_PA01",
-      default: { mode: "input", pull: "none", driveMa: 10 },
+      default: { mode: "input", pull: "none", driveStrength_mA: 10 },
       functions: [],
     },
   ],
@@ -59,7 +59,7 @@ BSP_GPIO_PINMUX("LED", GPIOA, 1U, HAL_GPIO_FUNCTION_OUTPUT_HIGH,
   const result = parseBoardPinmux(source, path.join("board", "board_pinmux.c"), definition, boardPins);
   check(result.entries.length === 2, "function and GPIO entries are parsed while comments are ignored");
   check(result.entries[0]?.pinId === "PC04" && result.entries[0]?.signal === "CAN0_TX", "function entry resolves through .impx");
-  check(result.entries[0]?.pull === "up" && result.entries[0]?.driveMa === 20 && result.entries[0]?.schmitt, "electrical settings are parsed");
+  check(result.entries[0]?.pull === "up" && result.entries[0]?.driveStrength_mA === 20 && result.entries[0]?.schmitt, "electrical settings are parsed");
   check(result.entries[1]?.gpioMode === "output-high", "GPIO output mode is parsed");
   check(result.entries[1]?.activeLevel === "low", "GPIO active level is loaded from board_pins.h");
   check(result.issues.length === 0, "valid entries have no issues");

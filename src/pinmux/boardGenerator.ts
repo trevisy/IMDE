@@ -9,7 +9,7 @@ export interface BoardPinmuxConfiguration {
   activeLevel?: "low" | "high";
   pull: "none" | "up" | "down";
   speed: "low" | "high";
-  driveMa: number | string;
+  driveStrength_mA: number | string;
   schmitt: boolean;
 }
 
@@ -60,9 +60,11 @@ function gpioMode(configuration: BoardPinmuxConfiguration): string {
 }
 
 function driveStrength(value: number | string): string {
-  const normalized = String(value);
-  if (!/^\d+$/.test(normalized) || Number(normalized) <= 0) throw new Error(`Invalid GPIO drive strength: ${value}.`);
-  return `IM_GPIO_DRIVE_STRENGTH_${normalized}MA`;
+  const normalized = typeof value === "string" ? value.trim() : String(value);
+  const match = /^(\d+)(?:mA)?$/.exec(normalized);
+  const milliamps = match ? Number(match[1]) : NaN;
+  if (![10, 20, 30, 40].includes(milliamps)) throw new Error(`Invalid GPIO drive strength: ${value}.`);
+  return `IM_GPIO_DRIVE_STRENGTH_${milliamps}MA`;
 }
 
 function macroFor(configuration: BoardPinmuxConfiguration, definition: PinmuxDefinition): string {
@@ -92,7 +94,7 @@ function macroFor(configuration: BoardPinmuxConfiguration, definition: PinmuxDef
     : gpioMode(configuration);
   const pull = `IM_GPIO_PULL_${configuration.pull.toUpperCase()}`;
   const speed = `IM_GPIO_SLEW_${configuration.speed.toUpperCase()}`;
-  const drive = driveStrength(configuration.driveMa);
+  const drive = driveStrength(configuration.driveStrength_mA);
   return [
     `    IM_GPIO_PINMUX_CONFIG(${ownerLiteral},`,
     `                           IM_GPIO_PORT_${location.port},`,
@@ -153,6 +155,9 @@ ${ownershipNote.trimEnd()}
 
 #include "im_gpio.h"
 #include "im_utils.h"
+
+#define BSP_PINMUX_CHIP ${JSON.stringify(definition.chip.id)}
+#define BSP_PINMUX_PACKAGE ${JSON.stringify(definition.package.id)}
 
 static const im_gpio_pinmux_config_t s_board_pinmux[] = {
 ${entries}

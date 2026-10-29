@@ -19,7 +19,7 @@ export interface BoardPinmuxEntry {
   activeLevel?: "low" | "high";
   pull: BoardPinPull;
   speed: BoardPinSpeed;
-  driveMa: number;
+  driveStrength_mA: number;
   schmitt: boolean;
   line: number;
   signal?: string;
@@ -229,7 +229,7 @@ function parseEntry(call: MacroCall, issues: BoardPinmuxIssue[]): BoardPinmuxEnt
     gpioMode,
     pull: pullMatch[1].toLowerCase() as BoardPinPull,
     speed: speedMatch[1].toLowerCase() as BoardPinSpeed,
-    driveMa: Number(driveMatch[1]),
+    driveStrength_mA: Number(driveMatch[1]),
     schmitt: schmittArg === "true",
     line: call.line,
   };

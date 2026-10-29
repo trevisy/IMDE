@@ -5,11 +5,14 @@ export interface PinmuxBoardTarget {
   id: string;
   directory: string;
   pinmuxFile: string;
+  chipDirectory: string;
+  source: "project" | "test";
 }
 
 export interface PinmuxChipTarget {
   id: string;
   directory: string;
+  sourceDirectories: Partial<Record<PinmuxBoardTarget["source"], string>>;
   boards: PinmuxBoardTarget[];
   pinlistFiles: string[];
 }
@@ -38,31 +41,45 @@ function compareIds(left: { id: string }, right: { id: string }): number {
 }
 
 export async function discoverPinmuxTargets(projectDir: string): Promise<PinmuxChipTarget[]> {
-  const bspRoot = path.join(projectDir, "code", "bsp");
+  const bspRoots = [
+    { root: path.join(projectDir, "code", "bsp"), source: "project" as const },
+    { root: path.join(projectDir, "test", "bsp"), source: "test" as const },
+  ];
   const pinlistRoot = path.join(projectDir, "tools", "imde", "pinmux");
-  const chipDirectories = await readDirectories(bspRoot);
-  const chips: PinmuxChipTarget[] = [];
+  const chipsById = new Map<string, PinmuxChipTarget>();
 
-  for (const chipEntry of chipDirectories) {
-    if (chipEntry.name === "common") continue;
+  for (const { root, source } of bspRoots) {
+    const chipDirectories = await readDirectories(root);
+    for (const chipEntry of chipDirectories) {
+      if (chipEntry.name === "common") continue;
 
-    const chipDirectory = path.join(bspRoot, chipEntry.name);
-    const boardDirectories = await readDirectories(chipDirectory);
-    const boards: PinmuxBoardTarget[] = [];
+      const chipDirectory = path.join(root, chipEntry.name);
+      const boardDirectories = await readDirectories(chipDirectory);
+      const chip = chipsById.get(chipEntry.name) || {
+        id: chipEntry.name,
+        directory: chipDirectory,
+        sourceDirectories: {},
+        boards: [],
+        pinlistFiles: [],
+      };
+      chip.sourceDirectories[source] = chipDirectory;
 
-    for (const boardEntry of boardDirectories) {
-      const boardDirectory = path.join(chipDirectory, boardEntry.name);
-      const pinmuxFile = path.join(boardDirectory, "board_pinmux.c");
-      if (await isFile(pinmuxFile)) {
-        boards.push({ id: boardEntry.name, directory: boardDirectory, pinmuxFile });
+      for (const boardEntry of boardDirectories) {
+        const boardDirectory = path.join(chipDirectory, boardEntry.name);
+        const pinmuxFile = path.join(boardDirectory, "board_pinmux.c");
+        if (await isFile(pinmuxFile)) {
+          chip.boards.push({ id: boardEntry.name, directory: boardDirectory, pinmuxFile, chipDirectory, source });
+        }
       }
+      chipsById.set(chipEntry.name, chip);
     }
+  }
 
-    const pinlistDirectory = path.join(pinlistRoot, chipEntry.name);
-    let pinlistFiles: string[] = [];
+  for (const chip of chipsById.values()) {
+    const pinlistDirectory = path.join(pinlistRoot, chip.id);
     try {
       const entries = await fs.promises.readdir(pinlistDirectory, { withFileTypes: true });
-      pinlistFiles = entries
+      chip.pinlistFiles = entries
         .filter(entry => entry.isFile() && entry.name.toLowerCase().endsWith(".impx"))
         .map(entry => path.join(pinlistDirectory, entry.name))
         .sort((left, right) => path.basename(left).localeCompare(path.basename(right), undefined, { numeric: true, sensitivity: "base" }));
@@ -70,11 +87,10 @@ export async function discoverPinmuxTargets(projectDir: string): Promise<PinmuxC
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
 
-    if (boards.length === 0 && pinlistFiles.length === 0) continue;
-
-    boards.sort(compareIds);
-    chips.push({ id: chipEntry.name, directory: chipDirectory, boards, pinlistFiles });
+    chip.boards.sort((left, right) => compareIds(left, right) || left.source.localeCompare(right.source));
   }
 
-  return chips.sort(compareIds);
+  return [...chipsById.values()]
+    .filter(chip => chip.boards.length > 0 || chip.pinlistFiles.length > 0)
+    .sort(compareIds);
 }

@@ -25,6 +25,11 @@ interface ChipItem extends vscode.QuickPickItem {
   records: DefconfigRecord[];
 }
 
+interface ConfigGroupItem extends vscode.QuickPickItem {
+  records: DefconfigRecord[];
+  segments: string[];
+}
+
 interface DefconfigItem extends vscode.QuickPickItem {
   commandArgs: string[];
   recentKey: string;
@@ -44,6 +49,7 @@ function showPickStep<T extends vscode.QuickPickItem>(
   items: readonly T[],
   placeHolder: string,
   showBack: boolean,
+  searchItems?: (value: string) => readonly T[],
 ): Promise<PickStepResult<T>> {
   return new Promise((resolve) => {
     const picker = vscode.window.createQuickPick<T | BackPickItem>();
@@ -57,6 +63,11 @@ function showPickStep<T extends vscode.QuickPickItem>(
     picker.placeholder = placeHolder;
     picker.matchOnDescription = true;
     picker.matchOnDetail = true;
+    picker.onDidChangeValue((value) => {
+      if (!searchItems) return;
+      const matches = searchItems(value.trim());
+      picker.items = showBack ? [backItem, ...matches] : matches;
+    });
 
     const finish = (result: PickStepResult<T>) => {
       if (settled) return;
@@ -156,6 +167,39 @@ function makeConfigItems(
   });
 }
 
+function pathSegments(record: DefconfigRecord, source: string): string[] {
+  let value = (record.rootRelativePath || record.token).replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  if (source === "test" && record.microchip) value = withoutPrefix(value, record.microchip);
+  return value.split("/").filter(Boolean);
+}
+
+function recordsAtGroup(records: DefconfigRecord[], source: string, prefix: string[]): { groups: ConfigGroupItem[]; leaves: DefconfigRecord[] } {
+  const groups = new Map<string, DefconfigRecord[]>();
+  const leaves: DefconfigRecord[] = [];
+  for (const record of records) {
+    const segments = pathSegments(record, source);
+    if (!prefix.every((segment, index) => segments[index] === segment)) continue;
+    if (segments.length <= prefix.length + 1) {
+      leaves.push(record);
+      continue;
+    }
+    const key = segments[prefix.length];
+    const grouped = groups.get(key) || [];
+    grouped.push(record);
+    groups.set(key, grouped);
+  }
+  return {
+    groups: [...groups.entries()].map(([label, grouped]) => ({
+      label,
+      records: grouped,
+      segments: [...prefix, label],
+      description: `${grouped.length} configs`,
+      iconPath: new vscode.ThemeIcon("folder"),
+    })).sort((left, right) => left.label.localeCompare(right.label)),
+    leaves,
+  };
+}
+
 export async function selectDefconfig(
   runner: ImdeRunner,
   context?: vscode.ExtensionContext,
@@ -202,10 +246,24 @@ export async function selectDefconfig(
     sourceOrder[left.sourceKind] - sourceOrder[right.sourceKind] || left.label.localeCompare(right.label));
   let pickedSource: SourceItem | undefined;
   let picked: DefconfigItem | undefined;
+  const searchableItems = (records: DefconfigRecord[]): DefconfigItem[] => records.flatMap(record => {
+    const source = sourceIdentity(record).source;
+    return makeConfigItems([record], source, recent).map(item => ({
+      ...item,
+      label: record.relativePath || `${source}/${record.rootRelativePath || record.token}`,
+    }));
+  });
   while (!picked) {
     if (!pickedSource) {
-      const sourceResult = await showPickStep(sources, "Select config source...", false);
+      const sourceResult = await showPickStep<SourceItem | DefconfigItem>(
+        sources, "Select config source...", false,
+        query => query ? searchableItems(output.defconfigs!) : sources,
+      );
       if (sourceResult.action !== "pick") return;
+      if ("commandArgs" in sourceResult.item) {
+        picked = sourceResult.item;
+        break;
+      }
       pickedSource = sourceResult.item;
     }
 
@@ -227,26 +285,61 @@ export async function selectDefconfig(
           iconPath: new vscode.ThemeIcon("circuit-board"),
         }))
         .sort((left, right) => left.label.localeCompare(right.label));
-      const chipResult = await showPickStep(chips, "Select test chip...", true);
+      const chipResult = await showPickStep<ChipItem | DefconfigItem>(
+        chips, "Select test chip...", true,
+        query => query ? searchableItems(records) : chips,
+      );
       if (chipResult.action === "cancel") return;
       if (chipResult.action === "back") {
         pickedSource = undefined;
         continue;
       }
+      if ("commandArgs" in chipResult.item) {
+        picked = chipResult.item;
+        break;
+      }
       records = chipResult.item.records;
     }
 
-    const configResult = await showPickStep(
-      makeConfigItems(records, pickedSource.source, recent),
-      `Select ${pickedSource.source} defconfig...`,
-      true,
-    );
-    if (configResult.action === "cancel") return;
-    if (configResult.action === "back") {
-      if (pickedSource.sourceKind !== "test") pickedSource = undefined;
-      continue;
+    let prefix: string[] = [];
+    while (!picked) {
+      const next = recordsAtGroup(records, pickedSource.source, prefix);
+      const configItems = makeConfigItems(next.leaves, pickedSource.source, recent);
+      const choices: vscode.QuickPickItem[] = [...next.groups, ...configItems];
+      if (choices.length === 0) break;
+      const descendantItems = (query: string): DefconfigItem[] => {
+        const descendants = records.filter(record => {
+          const segments = pathSegments(record, pickedSource!.source);
+          const fullPath = segments.join("/");
+          return !query || fullPath.toLowerCase().includes(query.toLowerCase());
+        });
+        return descendants.map(record => {
+          const item = makeConfigItems([record], pickedSource!.source, recent)[0];
+          return { ...item, label: pathSegments(record, pickedSource!.source).join("/") };
+        });
+      };
+      const configResult = await showPickStep(
+        choices,
+        `Select ${pickedSource.source} defconfig...`,
+        true,
+        query => query ? descendantItems(query) : choices,
+      );
+      if (configResult.action === "cancel") return;
+      if (configResult.action === "back") {
+        if (prefix.length > 0) {
+          prefix = prefix.slice(0, -1);
+          continue;
+        }
+        if (pickedSource.sourceKind !== "test") pickedSource = undefined;
+        break;
+      }
+      const item = configResult.item;
+      if ("commandArgs" in item) {
+        picked = item as DefconfigItem;
+      } else {
+        prefix = (item as ConfigGroupItem).segments;
+      }
     }
-    picked = configResult.item;
   }
 
   const result = await runner.runCommand("use-defconfig", picked.commandArgs, {

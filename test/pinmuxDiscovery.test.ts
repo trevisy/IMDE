@@ -62,11 +62,29 @@ async function testDiscoversChipWithoutBoards(): Promise<void> {
   }
 }
 
+async function testDiscoversTestBspBoards(): Promise<void> {
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "imde-pinmux-discovery-test-bsp-"));
+  try {
+    writeFile(path.join(projectDir, "code", "bsp", "g32s10", "project_board", "board_pinmux.c"));
+    writeFile(path.join(projectDir, "test", "bsp", "g32s10", "fpga_image1", "board_pinmux.c"));
+    writeFile(path.join(projectDir, "tools", "imde", "pinmux", "g32s10", "g32s10-qfn148.impx"));
+
+    const chips = await discoverPinmuxTargets(projectDir);
+    check(chips.length === 1, "project and test BSP roots are grouped under one chip");
+    check(chips[0]?.boards.map(board => board.id).join(",") === "fpga_image1,project_board", "test BSP boards are included");
+    const testBoard = chips[0]?.boards.find(board => board.id === "fpga_image1");
+    check(testBoard?.source === "test" && testBoard.chipDirectory.endsWith(path.join("test", "bsp", "g32s10")), "test BSP keeps its source and chip directory");
+  } finally {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  }
+}
+
 async function main(): Promise<void> {
   console.log("\n=== Pinmux Discovery ===");
   await testDiscoversChipsBoardsAndPinlists();
   await testMissingBspDirectoryIsEmpty();
   await testDiscoversChipWithoutBoards();
+  await testDiscoversTestBspBoards();
   console.log("\n" + (failed === 0 ? "OK" : "FAIL") + ` Passed: ${passed}  Failed: ${failed}`);
   if (failed > 0) process.exit(1);
 }
