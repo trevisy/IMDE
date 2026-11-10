@@ -111,6 +111,9 @@ function sourceIdentity(record: DefconfigRecord): Pick<SourceItem, "source" | "s
   if (root === "code/middleware" || root.endsWith("/middleware")) {
     return { source: "middleware", sourceKind: "middleware" };
   }
+  if (root.endsWith("/config")) {
+    return { source: root, sourceKind: "other" };
+  }
   return { source: root.split("/").filter(Boolean).pop() || root, sourceKind: "other" };
 }
 

@@ -3,12 +3,14 @@ import * as cp from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
+import { StringDecoder } from "string_decoder";
 
 export interface ImdeCommandResult {
   code: number | null;
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  cancelled?: boolean;
   commandLine: string;
 }
 
@@ -19,6 +21,7 @@ export interface ImdeRunOptions {
   streamOutput?: boolean;
   displayTarget?: "terminal" | "output";
   onProgress?: (current: number, total: number, detail: string) => void;
+  cancellationToken?: vscode.CancellationToken;
 }
 
 /** Canonical platform directory name matching IMDE Python detect_platform(). */
@@ -312,7 +315,7 @@ export class ImdeRunner implements vscode.Disposable {
     const proj = this._projectRoot!;
     const { terminal } = this.getSharedTerminal(proj);
     const object = vscode.workspace.getConfiguration("imde").get<string>("buildObject") || "default";
-    const objectCommands = new Set(["status", "artifacts", "configure", "build", "clean", "fullclean", "menuconfig"]);
+    const objectCommands = new Set(["status", "artifacts", "configure", "clean", "fullclean", "menuconfig"]);
     const effectiveArgs = objectCommands.has(cmd) ? [...args, object] : args;
     if (cmd) {
       void this.ensureTerminalEnv(proj).then(() => {
@@ -418,7 +421,17 @@ export class ImdeRunner implements vscode.Disposable {
   }
 
   async runCommand(cmd: string, args: string[] = [], opts: ImdeRunOptions = {}): Promise<ImdeCommandResult> {
-    const run = async () => {
+    const run = async (token = opts.cancellationToken) => {
+      if (token?.isCancellationRequested) {
+        return {
+          code: null,
+          stdout: "",
+          stderr: "",
+          timedOut: false,
+          cancelled: true,
+          commandLine: cmd,
+        } satisfies ImdeCommandResult;
+      }
       this.invalidateJsonCache();
       const result = await this.execute(cmd, args, {
         json: false,
@@ -426,6 +439,7 @@ export class ImdeRunner implements vscode.Disposable {
         displayTarget: opts.displayTarget ?? "terminal",
         timeoutMs: opts.timeoutMs ?? this.commandTimeoutMs(),
         onProgress: opts.onProgress,
+        cancellationToken: token,
       });
       this.invalidateJsonCache();
       return result;
@@ -436,8 +450,8 @@ export class ImdeRunner implements vscode.Disposable {
     }
 
     return vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: opts.progressTitle, cancellable: false },
-      async (progress) => {
+      { location: vscode.ProgressLocation.Notification, title: opts.progressTitle, cancellable: true },
+      async (progress, token) => {
         const started = Date.now();
         progress.report({ message: opts.progressDetail ?? "Starting..." });
         const timer = setInterval(() => {
@@ -446,14 +460,16 @@ export class ImdeRunner implements vscode.Disposable {
         }, 1000);
 
         try {
-          const result = await run();
+          const result = await run(token);
           const elapsed = Math.max(0, Math.floor((Date.now() - started) / 1000));
           progress.report({
             message: result.code === 0 && !result.timedOut
               ? `Completed in ${elapsed}s`
-              : result.timedOut
-                ? `Timed out after ${elapsed}s`
-                : `Failed after ${elapsed}s`,
+              : result.cancelled
+                ? `Cancelled after ${elapsed}s`
+                : result.timedOut
+                  ? `Timed out after ${elapsed}s`
+                  : `Failed after ${elapsed}s`,
           });
           return result;
         } finally {
@@ -503,7 +519,14 @@ export class ImdeRunner implements vscode.Disposable {
   private execute(
     cmd: string,
     args: string[],
-    opts: { json: boolean; streamOutput: boolean; displayTarget: "terminal" | "output"; timeoutMs: number; onProgress?: (current: number, total: number, detail: string) => void }
+    opts: {
+      json: boolean;
+      streamOutput: boolean;
+      displayTarget: "terminal" | "output";
+      timeoutMs: number;
+      onProgress?: (current: number, total: number, detail: string) => void;
+      cancellationToken?: vscode.CancellationToken;
+    }
   ): Promise<ImdeCommandResult> {
     if (!this.isValidImdeProject) {
       return Promise.resolve({ code: null, stdout: "", stderr: "Not an IMDE project", timedOut: false, commandLine: "" });
@@ -511,7 +534,7 @@ export class ImdeRunner implements vscode.Disposable {
     const proj = this._projectRoot!;
     const imdeBin = this.imdeBin();
     const object = vscode.workspace.getConfiguration("imde").get<string>("buildObject") || "default";
-    const objectCommands = new Set(["status", "artifacts", "configure", "build", "clean", "fullclean", "menuconfig"]);
+    const objectCommands = new Set(["status", "artifacts", "configure", "clean", "fullclean", "menuconfig"]);
     const effectiveArgs = objectCommands.has(cmd) ? [...args, object] : args;
     const extensionArgs = this.extensionArgs(proj);
 
@@ -557,6 +580,7 @@ export class ImdeRunner implements vscode.Disposable {
         commandLine,
         timeoutMs: opts.timeoutMs,
         onProgress: opts.onProgress,
+        cancellationToken: opts.cancellationToken,
       });
     }
 
@@ -564,6 +588,7 @@ export class ImdeRunner implements vscode.Disposable {
       let stdout = "";
       let stderr = "";
       let timedOut = false;
+      let cancelled = false;
       let settled = false;
 
       const loginEnv = ImdeRunner.resolveLoginEnv();
@@ -574,15 +599,23 @@ export class ImdeRunner implements vscode.Disposable {
           PYTHONIOENCODING: process.env.PYTHONIOENCODING || "utf-8",
         },
       });
+      let cancelSubscription: vscode.Disposable | undefined;
       const finish = (result: ImdeCommandResult) => {
         if (settled) { return; }
         settled = true;
+        if (timer) { clearTimeout(timer); }
+        cancelSubscription?.dispose();
         resolve(result);
       };
 
       const timer = opts.timeoutMs > 0
         ? setTimeout(() => { timedOut = true; proc.kill(); }, opts.timeoutMs)
         : undefined;
+      cancelSubscription = opts.cancellationToken?.onCancellationRequested(() => {
+        cancelled = true;
+        try { proc.kill(); } catch { /* best-effort */ }
+        finish({ code: null, stdout, stderr, timedOut, cancelled, commandLine });
+      });
 
       proc.stdout!.on("data", (d: Buffer) => {
         const text = d.toString();
@@ -605,17 +638,15 @@ export class ImdeRunner implements vscode.Disposable {
         parseProgress(text);
       });
       proc.on("error", (err) => {
-        if (timer) { clearTimeout(timer); }
         try { proc.kill(); } catch { /* best-effort */ }
-        finish({ code: null, stdout, stderr: stderr + err.message, timedOut, commandLine });
+        finish({ code: null, stdout, stderr: stderr + err.message, timedOut, cancelled, commandLine });
       });
       proc.on("close", (code) => {
-        if (timer) { clearTimeout(timer); }
         if (opts.streamOutput) {
           this.output.appendLine("");
           this.output.appendLine(timedOut ? `Timed out: ${commandLine}` : `Exit code: ${code ?? "unknown"}`);
         }
-        finish({ code, stdout, stderr, timedOut, commandLine });
+        finish({ code, stdout, stderr, timedOut, cancelled, commandLine });
       });
     });
   }
@@ -627,29 +658,34 @@ export class ImdeRunner implements vscode.Disposable {
       commandLine: string;
       timeoutMs: number;
       onProgress?: (current: number, total: number, detail: string) => void;
+      cancellationToken?: vscode.CancellationToken;
     }
   ): Promise<ImdeCommandResult> {
+    if (opts.cancellationToken?.isCancellationRequested) {
+      return Promise.resolve({
+        code: null,
+        stdout: "",
+        stderr: "",
+        timedOut: false,
+        cancelled: true,
+        commandLine: opts.commandLine,
+      });
+    }
+
+    // Shell Integration can miss execution-end events after long builds, leaving the
+    // shared command queue permanently blocked. The wrapper script provides an explicit
+    // exit code and PID on every platform, so command completion never depends on that event.
     const run = async () => {
-      const { terminal } = this.getSharedTerminal(opts.cwd);
-      terminal.show(true);
-      const visibleCommand = this.formatManagedTerminalCommand(commandTokens);
-
-      const shellIntegration = process.platform === "darwin"
-        ? undefined
-        : await this.waitForShellIntegration(terminal, 3000);
-      if (shellIntegration) {
-        try {
-          return await this.executeWithShellIntegration(
-            terminal,
-            shellIntegration,
-            visibleCommand,
-            opts,
-          );
-        } catch (err: any) {
-          this.output.appendLine(`IMDE terminal shell integration failed, using script fallback: ${err?.message || err}`);
-        }
+      if (opts.cancellationToken?.isCancellationRequested) {
+        return {
+          code: null,
+          stdout: "",
+          stderr: "",
+          timedOut: false,
+          cancelled: true,
+          commandLine: opts.commandLine,
+        } satisfies ImdeCommandResult;
       }
-
       return this.executeWithTerminalScript(commandTokens, opts);
     };
 
@@ -706,72 +742,6 @@ export class ImdeRunner implements vscode.Disposable {
     });
   }
 
-  private executeWithShellIntegration(
-    terminal: vscode.Terminal,
-    shellIntegration: vscode.TerminalShellIntegration,
-    commandLine: string,
-    opts: {
-      cwd: string;
-      commandLine: string;
-      timeoutMs: number;
-      onProgress?: (current: number, total: number, detail: string) => void;
-    },
-  ): Promise<ImdeCommandResult> {
-    return new Promise(resolve => {
-      let execution: vscode.TerminalShellExecution | undefined;
-      let stdout = "";
-      let settled = false;
-      let timedOut = false;
-      let outputDone: Promise<void> = Promise.resolve();
-
-      const finish = (code: number | null) => {
-        if (settled) { return; }
-        settled = true;
-        if (timer) { clearTimeout(timer); }
-        endSubscription.dispose();
-        void (async () => {
-          await Promise.race([
-            outputDone,
-            new Promise(resolveDrain => setTimeout(resolveDrain, 1000)),
-          ]);
-          resolve({
-            code,
-            stdout,
-            stderr: "",
-            timedOut,
-            commandLine: opts.commandLine,
-          });
-        })();
-      };
-
-      const endSubscription = vscode.window.onDidEndTerminalShellExecution(event => {
-        if (event.terminal === terminal && event.execution === execution) {
-          finish(event.exitCode ?? null);
-        }
-      });
-
-      const timer = opts.timeoutMs > 0
-        ? setTimeout(() => {
-          timedOut = true;
-          // Best effort: ask the foreground shell command to stop.
-          terminal.sendText("\x03", false);
-          finish(null);
-        }, opts.timeoutMs)
-        : undefined;
-
-      execution = shellIntegration.executeCommand(commandLine);
-      outputDone = (async () => {
-        for await (const data of execution!.read()) {
-          const clean = this.stripTerminalControl(data);
-          stdout += clean;
-          this.parseProgress(clean, opts.onProgress);
-        }
-      })().catch(err => {
-        stdout += `\n[IMDE] Failed to read terminal output: ${err?.message || err}\n`;
-      });
-    });
-  }
-
   private executeWithTerminalScript(
     commandTokens: string[],
     opts: {
@@ -779,6 +749,7 @@ export class ImdeRunner implements vscode.Disposable {
       commandLine: string;
       timeoutMs: number;
       onProgress?: (current: number, total: number, detail: string) => void;
+      cancellationToken?: vscode.CancellationToken;
     },
   ): Promise<ImdeCommandResult> {
     return new Promise(resolve => {
@@ -786,29 +757,64 @@ export class ImdeRunner implements vscode.Disposable {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "imde-"));
       const logFile = path.join(tempDir, "command.log");
       const exitFile = path.join(tempDir, "exit.code");
+      const pidFile = path.join(tempDir, "command.pid");
       const visibleCommand = this.formatManagedTerminalCommand(commandTokens);
-      const script = this.createTerminalScript(visibleCommand, opts.cwd, logFile, exitFile, opts.commandLine);
+      const script = this.createTerminalScript(
+        visibleCommand,
+        opts.cwd,
+        logFile,
+        exitFile,
+        pidFile,
+        opts.commandLine,
+      );
       let stdout = "";
-      let offset = 0;
+      let logOffset = 0;
+      let missingExitSince = 0;
+      let exitSeenSince = 0;
       let settled = false;
+      const decoder = new StringDecoder("utf8");
 
-      const consumeLog = () => {
+      const consumeLog = (flush = false) => {
         if (!fs.existsSync(logFile)) { return; }
-        const text = fs.readFileSync(logFile, "utf8");
-        if (text.length <= offset) { return; }
-        const chunk = this.stripTerminalControl(text.slice(offset));
-        offset = text.length;
-        stdout += chunk;
-        this.parseProgress(chunk, opts.onProgress);
+        const size = fs.statSync(logFile).size;
+        if (size <= logOffset) {
+          if (flush) {
+            const tail = decoder.end();
+            if (tail) {
+              stdout += tail;
+              this.parseProgress(tail, opts.onProgress);
+            }
+          }
+          return;
+        }
+        const fd = fs.openSync(logFile, "r");
+        try {
+          while (logOffset < size) {
+            const buffer = Buffer.alloc(Math.min(256 * 1024, size - logOffset));
+            const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, logOffset);
+            if (bytesRead <= 0) { break; }
+            logOffset += bytesRead;
+            const clean = this.stripTerminalControl(decoder.write(buffer.subarray(0, bytesRead)));
+            if (!clean) { continue; }
+            stdout += clean;
+            this.parseProgress(clean, opts.onProgress);
+          }
+        } finally {
+          fs.closeSync(fd);
+        }
       };
 
-      const finish = (code: number | null, timedOut: boolean) => {
+      let cancelSubscription: vscode.Disposable | undefined;
+      let closeSubscription: vscode.Disposable | undefined;
+      const finish = (code: number | null, timedOut: boolean, cancelled = false) => {
         if (settled) { return; }
         settled = true;
         clearTimeout(startupTimer);
         if (timer) { clearTimeout(timer); }
         clearInterval(poll);
-        consumeLog();
+        cancelSubscription?.dispose();
+        closeSubscription?.dispose();
+        consumeLog(true);
         if (timedOut) {
           terminal.sendText("\x03", false);
         }
@@ -818,24 +824,66 @@ export class ImdeRunner implements vscode.Disposable {
           stdout,
           stderr: "",
           timedOut,
+          cancelled,
           commandLine: opts.commandLine,
         });
       };
 
       const poll = setInterval(() => {
         consumeLog();
-        if (!fs.existsSync(exitFile)) { return; }
-        const raw = fs.readFileSync(exitFile, "utf8").trim();
-        const parsed = Number.parseInt(raw, 10);
-        finish(Number.isFinite(parsed) ? parsed : null, false);
+        const pid = this.readProcessId(pidFile);
+        if (fs.existsSync(exitFile)) {
+          const raw = fs.readFileSync(exitFile, "utf8").trim();
+          const parsed = Number.parseInt(raw, 10);
+          if (pid === undefined || !this.isProcessAlive(pid)) {
+            consumeLog();
+            finish(Number.isFinite(parsed) ? parsed : null, false);
+            return;
+          }
+          if (exitSeenSince === 0) {
+            exitSeenSince = Date.now();
+          } else if (Date.now() - exitSeenSince >= 1500) {
+            // The command has published its exit code. Some shells keep their host
+            // process alive briefly after the pipeline; that must not block the queue.
+            consumeLog();
+            finish(Number.isFinite(parsed) ? parsed : null, false);
+          }
+          return;
+        }
+
+        if (pid !== undefined && !this.isProcessAlive(pid)) {
+          // Ctrl+C, terminal profile failures, and shell shutdown can prevent the
+          // wrapper from writing exit.code. Once the wrapper is gone, release the queue.
+          if (missingExitSince === 0) {
+            missingExitSince = Date.now();
+          } else if (Date.now() - missingExitSince >= 750) {
+            this.output.appendLine(`IMDE command process ${pid} exited without writing ${exitFile}`);
+            finish(null, false);
+          }
+        } else {
+          missingExitSince = 0;
+        }
       }, 250);
 
       const timer = opts.timeoutMs > 0
         ? setTimeout(() => finish(null, true), opts.timeoutMs)
         : undefined;
       const startupTimer = setTimeout(() => {
-        if (!fs.existsSync(logFile)) finish(null, true);
+        if (!fs.existsSync(pidFile)) {
+          this.output.appendLine("IMDE terminal command did not start within 15 seconds");
+          finish(null, false);
+        }
       }, 15000);
+
+      cancelSubscription = opts.cancellationToken?.onCancellationRequested(() => {
+        terminal.sendText("\x03", false);
+        finish(null, false, true);
+      });
+      closeSubscription = vscode.window.onDidCloseTerminal(closed => {
+        if (closed === terminal) {
+          finish(null, false);
+        }
+      });
 
       terminal.show(true);
       terminal.sendText(script.commandLine);
@@ -847,6 +895,7 @@ export class ImdeRunner implements vscode.Disposable {
     cwd: string,
     logFile: string,
     exitFile: string,
+    pidFile: string,
     commandLine: string,
   ): { commandLine: string } {
     const shell = (vscode.env.shell || "").toLowerCase();
@@ -857,6 +906,7 @@ export class ImdeRunner implements vscode.Disposable {
         "$ErrorActionPreference = 'Continue'",
         `Write-Host ${this.quoteTerminalArg(`[IMDE] > ${commandLine}`, psShell)}`,
         `Set-Location -LiteralPath ${this.quoteTerminalArg(cwd, psShell)}`,
+        `[System.IO.File]::WriteAllText(${this.quoteTerminalArg(pidFile, psShell)}, [string]$PID)`,
         `[System.IO.File]::WriteAllText(${this.quoteTerminalArg(logFile, psShell)}, '')`,
         "if (-not $env:PYTHONIOENCODING) { $env:PYTHONIOENCODING = 'utf-8' }",
         `${visibleCommand} 2>&1 | Tee-Object -FilePath ${this.quoteTerminalArg(logFile, psShell)}`,
@@ -869,7 +919,11 @@ export class ImdeRunner implements vscode.Disposable {
       if (shell.includes("cmd")) {
         return { commandLine: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${scriptPath.replace(/"/g, '""')}"` };
       }
-      return { commandLine: `& ${this.quoteTerminalArg(scriptPath, psShell)}` };
+      const pwshExecutable = psShell.includes("pwsh") ? psShell : "powershell.exe";
+      return {
+        commandLine: `& ${this.quoteTerminalArg(pwshExecutable, psShell)}`
+          + ` -NoProfile -ExecutionPolicy Bypass -File ${this.quoteTerminalArg(scriptPath, psShell)}`,
+      };
     }
 
     const scriptPath = path.join(path.dirname(logFile), "run-imde.sh");
@@ -878,6 +932,7 @@ export class ImdeRunner implements vscode.Disposable {
       "#!/bin/sh",
       `printf '%s\\n' ${this.quoteTerminalArg(`[IMDE] > ${commandLine}`, shShell)}`,
       `cd ${this.quoteTerminalArg(cwd, shShell)} || { printf '%s\\n' 'IMDE: failed to enter project directory' | tee ${this.quoteTerminalArg(logFile, shShell)}; printf '%s' 1 > ${this.quoteTerminalArg(exitFile, shShell)}; exit 1; }`,
+      `printf '%s' "$$" > ${this.quoteTerminalArg(pidFile, shShell)}`,
       `: > ${this.quoteTerminalArg(logFile, shShell)}`,
       "if [ -z \"${PYTHONIOENCODING+x}\" ]; then export PYTHONIOENCODING=utf-8; fi",
       `{ ${visibleCommand} 2>&1; printf '%s' "$?" > ${this.quoteTerminalArg(exitFile, shShell)}; } | tee ${this.quoteTerminalArg(logFile, shShell)}`,
@@ -885,6 +940,24 @@ export class ImdeRunner implements vscode.Disposable {
     ].join("\n");
     fs.writeFileSync(scriptPath, content, { encoding: "utf8", mode: 0o700 });
     return { commandLine: `sh ${this.quoteTerminalArg(scriptPath, shShell)}` };
+  }
+
+  private readProcessId(pidFile: string): number | undefined {
+    try {
+      const pid = Number.parseInt(fs.readFileSync(pidFile, "utf8").trim(), 10);
+      return Number.isFinite(pid) && pid > 0 ? pid : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private isProcessAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === "EPERM";
+    }
   }
 
   private isUnixLikeShell(shell: string): boolean {

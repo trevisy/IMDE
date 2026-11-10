@@ -2,7 +2,7 @@
   "name": "imde",
   "displayName": "IMDE",
   "description": "Ingenic MCU Development Environment for VS Code",
-  "version": "0.3.8-beta",
+  "version": "0.4.0",
   "publisher": "ingenic",
   "license": "ISC",
   "repository": {
@@ -39,6 +39,7 @@
     "onCommand:imde.build",
     "onCommand:imde.doctor",
     "onCommand:imde.fullCleanBuild",
+    "onCommand:imde.showWalkthrough",
     "onCommand:imde.viewMap",
     "onView:imde.doctorView",
     "onView:imde.buildView",
@@ -136,6 +137,11 @@
       {
         "command": "imde.setupIntelliSense",
         "title": "IMDE: Setup IntelliSense"
+      },
+      {
+        "command": "imde.showWalkthrough",
+        "title": "IMDE: Open Getting Started",
+        "icon": "$(book)"
       }
     ],
     "viewsContainers": {
@@ -189,6 +195,11 @@
           "command": "imde.pinmux",
           "when": "view == imde.buildView",
           "group": "navigation@3"
+        },
+        {
+          "command": "imde.showWalkthrough",
+          "when": "view == imde.buildView",
+          "group": "navigation@4"
         }
       ],
       "view/item/context": [
@@ -209,6 +220,84 @@
         }
       ]
     },
+    "walkthroughs": [
+      {
+        "id": "imde.gettingStarted",
+        "title": "IMDE 快速开始",
+        "description": "从环境检查到构建、配置和产物分析，完成 IMDE 的第一次完整工作流。",
+        "icon": "media/icon.png",
+        "steps": [
+          {
+            "id": "imde.project",
+            "title": "准备 IMDE 工程",
+            "description": "确认当前工作区包含 imde.json，并了解 IMDE 侧栏。",
+            "media": {
+              "markdown": "media/walkthrough/01-project.md"
+            }
+          },
+          {
+            "id": "imde.doctor",
+            "title": "检查开发环境",
+            "description": "运行 Doctor，检查 Python、CMake、Ninja 和工具链。",
+            "media": {
+              "markdown": "media/walkthrough/02-doctor.md"
+            },
+            "completionEvents": [
+              "onCommand:imde.doctor"
+            ]
+          },
+          {
+            "id": "imde.defconfig",
+            "title": "选择 Defconfig",
+            "description": "选择板级或芯片配置，并生成工程 .config。",
+            "media": {
+              "markdown": "media/walkthrough/03-defconfig.md"
+            },
+            "completionEvents": [
+              "onCommand:imde.selectDefconfig"
+            ]
+          },
+          {
+            "id": "imde.build",
+            "title": "配置并构建",
+            "description": "执行 Configure 和 Build，了解普通构建与干净重编译的区别。",
+            "media": {
+              "markdown": "media/walkthrough/04-build.md"
+            },
+            "completionEvents": [
+              "onCommand:imde.configure",
+              "onCommand:imde.build",
+              "onCommand:imde.fullCleanBuild"
+            ]
+          },
+          {
+            "id": "imde.visual-tools",
+            "title": "图形化配置与 Pinmux",
+            "description": "使用 GUI Config 编辑 Kconfig，使用 Pinmux 配置并生成 BSP 文件。",
+            "media": {
+              "markdown": "media/walkthrough/05-visual-tools.md"
+            },
+            "completionEvents": [
+              "onCommand:imde.guiConfig",
+              "onCommand:imde.pinmux"
+            ]
+          },
+          {
+            "id": "imde.results",
+            "title": "查看产物与代码分析",
+            "description": "浏览构建产物、打开 Memory Map，并生成 C/C++ IntelliSense 配置。",
+            "media": {
+              "markdown": "media/walkthrough/06-results.md"
+            },
+            "completionEvents": [
+              "onCommand:imde.artifacts",
+              "onCommand:imde.viewMap",
+              "onCommand:imde.setupIntelliSense"
+            ]
+          }
+        ]
+      }
+    ],
     "configuration": {
       "title": "IMDE",
       "properties": {
@@ -226,7 +315,7 @@
         "imde.buildObject": {
           "type": "string",
           "default": "default",
-          "description": "Build object used by IMDE commands, for example default or uart-test."
+          "description": "Object used by Configure, Clean, Menuconfig, Status, and Artifacts commands. The Build and Rebuild actions invoke `imde build` without an object argument."
         },
         "imde.captureTimeoutMs": {
           "type": "number",

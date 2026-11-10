@@ -70,6 +70,14 @@ async function getCachedMapData(filePath: string): Promise<MapParseResult> {
 export function activate(context: vscode.ExtensionContext) {
   Logger.info("IMDE extension is now active");
 
+  const openGettingStarted = () => vscode.commands.executeCommand(
+    "workbench.action.openWalkthrough",
+    "ingenic.imde#imde.gettingStarted",
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("imde.showWalkthrough", openGettingStarted),
+  );
+
   const runner = new ImdeRunner();
   context.subscriptions.push(runner);
 
@@ -91,6 +99,22 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   ImdeRunner.warmupEnv();
+
+  const walkthroughPromptKey = "imde.walkthroughPrompted.v1";
+  if (!context.globalState.get<boolean>(walkthroughPromptKey)) {
+    void context.globalState.update(walkthroughPromptKey, true);
+    const walkthroughTimer = setTimeout(() => {
+      void vscode.window.showInformationMessage(
+        "第一次使用 IMDE？使用向导会带你完成环境检查、配置和构建。",
+        "打开使用向导",
+      ).then(action => {
+        if (action === "打开使用向导") {
+          void openGettingStarted();
+        }
+      });
+    }, 1500);
+    context.subscriptions.push({ dispose: () => clearTimeout(walkthroughTimer) });
+  }
 
   // ---- Workspace folder change handling ----
   context.subscriptions.push(
@@ -208,6 +232,16 @@ export function activate(context: vscode.ExtensionContext) {
       timeoutMs: options?.timeoutMs,
     });
 
+    if (result.cancelled) {
+      vscode.window.setStatusBarMessage(`$(circle-slash) IMDE ${command} cancelled`, 3000);
+      refreshProjectState({
+        doctor: options?.refreshDoctor,
+        intelliSense: options?.syncIntelliSense,
+        map: options?.refreshMap,
+      });
+      return false;
+    }
+
     if (result.code !== 0 || result.timedOut) {
       const issueCount = diagnostics.report(result.stderr + "\n" + result.stdout);
       const reason = result.timedOut
@@ -292,7 +326,7 @@ export function activate(context: vscode.ExtensionContext) {
       pollRefresh(() => { buildTree.refresh(); artifactsTree.refresh(); }, 3000, 3);
     }),
     vscode.commands.registerCommand("imde.fullCleanBuild", async () => {
-      const cleaned = await runManagedAction("fullclean", ["--yes"], "IMDE Full Clean", {
+      const cleaned = await runManagedAction("fullclean", [], "IMDE Full Clean", {
         successMessage: "Full clean completed",
         refreshMap: true,
       });
@@ -311,19 +345,12 @@ export function activate(context: vscode.ExtensionContext) {
         refreshMap: true,
       })
     ),
-    vscode.commands.registerCommand("imde.fullclean", async () => {
-      const ans = await vscode.window.showWarningMessage(
-        "Delete the entire IMDE build directory? This cannot be undone.",
-        { modal: true },
-        "Delete"
-      );
-      if (ans === "Delete") {
-        await runManagedAction("fullclean", ["--yes"], "IMDE Full Clean", {
-          successMessage: "Full clean completed",
-          refreshMap: true,
-        });
-      }
-    }),
+    vscode.commands.registerCommand("imde.fullclean", () =>
+      runManagedAction("fullclean", [], "IMDE Full Clean", {
+        successMessage: "Full clean completed",
+        refreshMap: true,
+      })
+    ),
     vscode.commands.registerCommand("imde.status", async () =>
       runAction("status", [], "Reading IMDE status", buildTree.refresh.bind(buildTree))
     ),
@@ -736,11 +763,11 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     mkBar(`$(terminal-bash) IMDE ${PACKAGE_JSON.version || ""}`.trim(), "imde.openEnv", "Open IMDE terminal and source environment", 100),
-    mkBar("$(debug-rerun) Rebuild", "imde.fullCleanBuild", "FullClean & Build", 99),
-    mkBar("$(play) Build", "imde.build", "Build", 98),
-    mkBar("$(list-selection) Select", "imde.selectDefconfig", "Select Defconfig", 97),
-    mkBar("$(circuit-board) Pinmux", "imde.pinmux", "Open Pinmux", 96.5),
-    mkBar("$(settings) Config", "imde.guiConfig", "GUI Config", 96),
+    mkBar("$(list-selection) Select", "imde.selectDefconfig", "Select Defconfig", 99),
+    mkBar("$(circuit-board) Pinmux", "imde.pinmux", "Open Pinmux", 98.5),
+    mkBar("$(settings) Config", "imde.guiConfig", "GUI Config", 98),
+    mkBar("$(play) Build", "imde.build", "Build", 97),
+    mkBar("$(trash) Full Clean", "imde.fullclean", "Remove the IMDE build directory", 96),
     mapBar,
   );
 }

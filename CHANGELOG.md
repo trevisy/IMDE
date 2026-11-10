@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.0 — 2026.11.10
+
+### 构建与终端
+- 构建命令固定执行 `imde build`，不再自动追加 `default` 对象参数。
+- Full Clean 不再要求 `--yes`，插件也不再弹出额外确认框。
+- 底部快捷栏移除 Rebuild，改为独立的 Full Clean 和 Build。
+- 修复 Linux、macOS 和 Windows 上受管终端命令完成后进度仍持续、后续任务被队列阻塞的问题。
+
+### Defconfig
+- `app/config` 使用完整 source 名称，消除与工程根 `config/` 的歧义。
+- 保留 CLI 旧 `config` 名称作为兼容别名。
+
+### 使用引导
+- 新增原生 VS Code Walkthrough，覆盖工程准备、Doctor、Defconfig、构建、图形工具和产物分析。
+- 可通过命令面板 `IMDE: Open Getting Started` 或 Build & Config 视图标题栏重新打开。
+
+### 版本
+- IMDE VS Code 插件与 SDK CLI 脚本统一为 `0.4.0`。
+
 ## 0.3.7 (stable) — 2026.09.03
 
 ### GUI Config 与 IMDE 集成

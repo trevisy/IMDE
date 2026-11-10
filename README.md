@@ -94,6 +94,7 @@ flowchart LR
 | `IMDE: Pinmux` | 打开芯片与 BSP 的 Pinmux 配置工具。 |
 | `IMDE: View Map` | 打开构建产物的交互式 Memory Map。 |
 | `IMDE: Setup IntelliSense` | 根据编译数据库生成 C/C++ IntelliSense 配置。 |
+| `IMDE: Open Getting Started` | 随时重新打开 IMDE 使用引导。 |
 
 <details>
 <summary><strong>常用设置</strong></summary>
