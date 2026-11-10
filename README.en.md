@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="media/icon.png" width="96" alt="IMDE logo">
+  <img src="media/ingenic_logo.png" width="96" alt="Ingenic logo">
 
   <h1>IMDE</h1>
 
@@ -10,13 +10,13 @@
   </p>
 
   <p>
-    <a href="https://github.com/trevisy/IMDE/actions/workflows/ci.yml"><img src="https://github.com/trevisy/IMDE/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="https://github.com/ingenic-official/MCU-IMDE/actions/workflows/ci.yml"><img src="https://github.com/ingenic-official/MCU-IMDE/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="https://code.visualstudio.com/"><img src="https://img.shields.io/badge/VS%20Code-%3E%3D1.85-007ACC?logo=visualstudiocode&logoColor=white" alt="VS Code 1.85+"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-ISC-0B6BCB" alt="ISC License"></a>
   </p>
 
   <p>
-    <a href="https://github.com/trevisy/IMDE/releases/latest">Latest release</a>
+    <a href="https://github.com/ingenic-official/MCU-IMDE/releases/latest">Latest release</a>
     &nbsp;|&nbsp;
     <a href="#quick-start">Quick start</a>
     &nbsp;|&nbsp;
@@ -48,7 +48,7 @@ and memory-map analysis into one workspace.
 
 ### 1. Install the extension
 
-1. Open the [latest release](https://github.com/trevisy/IMDE/releases/latest).
+1. Open the [latest release](https://github.com/ingenic-official/MCU-IMDE/releases/latest).
 2. Download `imde-<version>.vsix`.
 3. Run `Extensions: Install from VSIX...` from the VS Code Command Palette.
 4. Select the VSIX and reload VS Code.

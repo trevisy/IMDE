@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="media/icon.png" width="96" alt="IMDE logo">
+  <img src="media/ingenic_logo.png" width="96" alt="Ingenic logo">
 
   <h1>IMDE</h1>
 
@@ -10,13 +10,13 @@
   </p>
 
   <p>
-    <a href="https://github.com/trevisy/IMDE/actions/workflows/ci.yml"><img src="https://github.com/trevisy/IMDE/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="https://github.com/ingenic-official/MCU-IMDE/actions/workflows/ci.yml"><img src="https://github.com/ingenic-official/MCU-IMDE/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="https://code.visualstudio.com/"><img src="https://img.shields.io/badge/VS%20Code-%3E%3D1.85-007ACC?logo=visualstudiocode&logoColor=white" alt="VS Code 1.85+"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-ISC-0B6BCB" alt="ISC License"></a>
   </p>
 
   <p>
-    <a href="https://github.com/trevisy/IMDE/releases/latest">最新发布</a>
+    <a href="https://github.com/ingenic-official/MCU-IMDE/releases/latest">最新发布</a>
     &nbsp;|&nbsp;
     <a href="#快速开始">快速开始</a>
     &nbsp;|&nbsp;
@@ -47,7 +47,7 @@ Kconfig、产物浏览和 Memory Map 分析统一到一个工作区。
 
 ### 1. 安装扩展
 
-1. 打开 [最新 Release](https://github.com/trevisy/IMDE/releases/latest)。
+1. 打开 [最新 Release](https://github.com/ingenic-official/MCU-IMDE/releases/latest)。
 2. 下载 `imde-<version>.vsix`。
 3. 在 VS Code 命令面板执行 `Extensions: Install from VSIX...`。
 4. 选择下载的 VSIX，然后重新加载 VS Code。
@@ -94,6 +94,7 @@ flowchart LR
 | `IMDE: Pinmux` | 打开芯片与 BSP 的 Pinmux 配置工具。 |
 | `IMDE: View Map` | 打开构建产物的交互式 Memory Map。 |
 | `IMDE: Setup IntelliSense` | 根据编译数据库生成 C/C++ IntelliSense 配置。 |
+| `IMDE: Open Getting Started` | 随时重新打开 IMDE 使用引导。 |
 
 <details>
 <summary><strong>常用设置</strong></summary>

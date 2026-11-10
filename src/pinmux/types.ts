@@ -16,7 +16,7 @@ export interface PinmuxPin {
   default: {
     mode: "input" | "output" | "alternate";
     pull: "none" | "up" | "down";
-    driveMa: number | string;
+    driveStrength_mA: number | string;
     mux?: number;
     outputLevel?: 0 | 1;
     schmitt?: boolean;
@@ -41,9 +41,9 @@ export interface PinmuxPeripheralGroup {
 export interface PinmuxDefinition {
   format: "impx";
   version: 1;
-  device: { id: string; name: string };
+  chip: { id: string; name: string };
   package: { id: string; name: string; pinCount: number };
-  source: { file: string; revision: string; date: string; sheets: string[] };
+  source?: { file: string; revision: string; date: string; sheets: string[] };
   signals: Record<string, PinmuxSignal>;
   pins: PinmuxPin[];
   peripheralGroups: PinmuxPeripheralGroup[];

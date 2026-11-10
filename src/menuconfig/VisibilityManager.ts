@@ -216,7 +216,45 @@ export class VisibilityManager {
 
         this.allMenus.forEach(clamp);
         this.evaluator.updateContext(this.configValues);
+        this.syncDuplicateSymbolContexts();
         return changed;
+    }
+
+    /**
+     * Kconfig allows one symbol to have multiple definitions guarded by
+     * different conditions. The menu tree keeps those definitions as separate
+     * nodes, so clamping an inactive definition must not overwrite the value of
+     * the symbol's active definition in the evaluator context.
+     */
+    private syncDuplicateSymbolContexts(): void {
+        for (const [name, definitions] of this.menusByName) {
+            if (definitions.length < 2) {
+                continue;
+            }
+
+            const activeDefinition = definitions.find((definition) => {
+                if (!definition.hasPrompt) {
+                    return false;
+                }
+                if (!definition.dependsOn) {
+                    return true;
+                }
+                try {
+                    return this.evaluator.evaluate(definition.dependsOn);
+                } catch {
+                    return definition.isVisible === true;
+                }
+            });
+            const definition = activeDefinition ?? definitions[0];
+            if (!definition || definition.value === undefined) {
+                continue;
+            }
+
+            if (!this.areMenuValuesEqual(this.configValues[name], definition.value, definition.type)) {
+                this.configValues[name] = definition.value;
+                this.evaluator.setValue(name, definition.value);
+            }
+        }
     }
 
     /**
